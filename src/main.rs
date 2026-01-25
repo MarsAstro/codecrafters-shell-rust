@@ -16,7 +16,14 @@ fn main() {
         if command == "exit" {
             break;
         }
-    
-        println!("{command}: command not found");
+
+        let words: Vec<&str> = command.split(' ').collect();
+
+        if !words.is_empty() && words[0] == "echo" {
+            let args = words[1..].join(" ");
+            println!("{args}");
+        } else {
+            println!("{command}: command not found");
+        }
     }
 }
