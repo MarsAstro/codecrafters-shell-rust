@@ -1,5 +1,7 @@
-#[allow(unused_imports)]
 use std::io::{self, Write};
+use std::env;
+
+const BUILTINS: &[&str] = &["exit", "echo", "type"];
 
 fn main() {
     loop {
@@ -7,29 +9,71 @@ fn main() {
         io::stdout().flush().unwrap();
     
         let mut command = String::new();
-        io::stdin()
-            .read_line(&mut command)
-            .expect("failed to read command");
-    
+        io::stdin().read_line(&mut command).unwrap();
         let command = command.trim();
 
-        if command == "exit" {
-            break;
+        let parts: Vec<&str> = command.split_whitespace().collect();
+
+        if parts.is_empty() {
+            continue;
         }
 
-        let words: Vec<&str> = command.split(' ').collect();
+        let cmd = parts[0];
+        let args = &parts[1..];
 
-        if !words.is_empty() && words[0] == "echo" {
-            let args = words[1..].join(" ");
-            println!("{args}");
-        } else if !words.is_empty() && words[0] == "type" {
-            if words[1] == "echo" || words[1] == "type" || words[1] == "exit" {
-                println!("{} is a shell builtin", words[1]);
-            } else {
-                println!("{}: not found", words[1]);
+        match cmd {
+            "exit" => std::process::exit(0),
+            "echo" => {
+                println!("{}", args.join(" "));
             }
-        } else {
-            println!("{command}: command not found");
+            " " => continue,
+            "type" => {
+                if args.is_empty() {
+                    println!("type: missing operand");
+                    continue;
+                }
+
+                let target = args[0];
+
+                if BUILTINS.contains(&target) {
+                    println!("{} is a shell builtin", target);
+                } else if let Some(path) = find_executable_in_path(target) {
+                    println!("{} is {}", target, path);
+                } else {
+                    println!("{target}: not found")
+                }
+            }
+            _ => println!("{}: command not found", cmd)
         }
     }
+}
+
+fn find_executable_in_path(file_name: &str) -> Option<String> {
+    match env::var_os("PATH") {
+        Some(paths) => {
+            for path in env::split_paths(&paths) {
+                let full_path = path.join(file_name);
+
+                if std::path::Path::new(&full_path).exists() {
+                    #[cfg(unix)] {
+
+                    if let Ok(metadata) = std::fs::metadata(&full_path) {
+                        let permissions = metadata.permissions();
+                        use std::os::unix::fs::PermissionsExt;
+                        if permissions.mode() & 0o111 != 0 {
+                            return Some(full_path.display().to_string())
+                        }
+                    }
+                    } #[cfg(not(unix))] {
+
+                    return Some(full_path.display().to_string())
+
+                    }
+                }
+            }
+        }
+        None => return None
+    }
+
+    None
 }
