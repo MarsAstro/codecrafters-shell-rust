@@ -41,6 +41,8 @@ fn run_cd_command(args: &[&str]) {
     } else if arg == "~" {
         if let Some(path) = env::var_os("HOME") {
             env::set_current_dir(path).expect("Failed to change working directory");
+        } else {
+            println!("cd: No home directory configured in environment variables");
         }
     } else {
         println!("cd: {}: No such file or directory", arg);
