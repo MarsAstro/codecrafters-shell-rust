@@ -43,7 +43,14 @@ fn main() {
                     println!("{target}: not found")
                 }
             }
-            _ => println!("{}: command not found", cmd)
+            _ => {
+                if let Some(_path) = find_executable_in_path(cmd) {
+                    let output = std::process::Command::new(cmd).args(args).output().expect("failed to execute program");
+                    io::stdout().write_all(&output.stdout).expect("couldn't write output to stdout");
+                } else { 
+                    println!("{}: command not found", cmd);
+                }
+            }
         }
     }
 }
