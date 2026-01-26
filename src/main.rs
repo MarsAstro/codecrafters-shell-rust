@@ -1,7 +1,8 @@
 use std::io::{self, Write};
 use std::env;
+use std::process;
 
-const BUILTINS: &[&str] = &["exit", "echo", "type"];
+const BUILTINS: &[&str] = &["exit", "echo", "type", "pwd"];
 
 fn main() {
     loop {
@@ -22,36 +23,45 @@ fn main() {
         let args = &parts[1..];
 
         match cmd {
-            "exit" => std::process::exit(0),
-            "echo" => {
-                println!("{}", args.join(" "));
-            }
-            " " => continue,
-            "type" => {
-                if args.is_empty() {
-                    println!("type: missing operand");
-                    continue;
-                }
-
-                let target = args[0];
-
-                if BUILTINS.contains(&target) {
-                    println!("{} is a shell builtin", target);
-                } else if let Some(path) = find_executable_in_path(target) {
-                    println!("{} is {}", target, path);
-                } else {
-                    println!("{target}: not found")
-                }
-            }
-            _ => {
-                if let Some(_path) = find_executable_in_path(cmd) {
-                    let output = std::process::Command::new(cmd).args(args).output().expect("failed to execute program");
-                    io::stdout().write_all(&output.stdout).expect("couldn't write output to stdout");
-                } else { 
-                    println!("{}: command not found", cmd);
-                }
-            }
+            " "     => continue,
+            "exit"  => process::exit(0),
+            "echo"  => println!("{}", args.join(" ")),
+            "type"  => run_type_command(args),
+            "pwd"   => run_pwd_command(),
+            _       => try_execute_command(cmd, args),
         }
+    }
+}
+
+fn run_pwd_command() {
+    if let Ok(cwd) = env::current_dir() {
+        println!("{}", cwd.display());
+    }
+}
+
+fn run_type_command(args: &[&str]) {
+    if args.is_empty() {
+        println!("type: missing operand");
+        return;
+    }
+
+    let target = args[0];
+
+    if BUILTINS.contains(&target) {
+        println!("{} is a shell builtin", target);
+    } else if let Some(path) = find_executable_in_path(target) {
+        println!("{} is {}", target, path);
+    } else {
+        println!("{target}: not found")
+    }
+}
+
+fn try_execute_command(cmd: &str, args: &[&str]) {
+    if let Some(_path) = find_executable_in_path(cmd) {
+        let output = process::Command::new(cmd).args(args).output().expect("failed to execute program");
+        io::stdout().write_all(&output.stdout).expect("couldn't write output to stdout");
+    } else { 
+        println!("{}: command not found", cmd);
     }
 }
 
