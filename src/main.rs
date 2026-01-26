@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 use std::env;
 use std::process;
+use shlex;
 
 const BUILTINS: &[&str] = &["exit", "echo", "type", "pwd", "cd"];
 
@@ -20,7 +21,9 @@ fn main() {
         }
 
         let cmd = parts[0];
-        let args = &parts[1..];
+        let args = shlex::split(command.trim_start_matches(cmd)).unwrap();
+        let args = args.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        let args: &Vec<&str> = &args.iter().map(|s| &**s).collect();
 
         match cmd {
             " "     => continue,
