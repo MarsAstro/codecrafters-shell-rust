@@ -20,10 +20,11 @@ fn main() {
             continue;
         }
 
-        let cmd = parts[0];
-        let args = shlex::split(command.trim_start_matches(cmd)).unwrap();
+        let args = shlex::split(command).unwrap();
         let args = args.iter().map(|s| s.to_string()).collect::<Vec<String>>();
         let args: &Vec<&str> = &args.iter().map(|s| &**s).collect();
+        let cmd = args[0];
+        let args = &args[1..];
 
         match cmd {
             " "     => continue,
