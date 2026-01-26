@@ -35,11 +35,15 @@ fn main() {
 }
 
 fn run_cd_command(args: &[&str]) {
-    let path = args[0];
-    if std::path::Path::new(&path).exists() {
-        env::set_current_dir(path).expect("Failed to change working directory");
+    let arg = args[0];
+    if std::path::Path::new(&arg).exists() {
+        env::set_current_dir(arg).expect("Failed to change working directory");
+    } else if arg == "~" {
+        if let Some(path) = env::var_os("HOME") {
+            env::set_current_dir(path).expect("Failed to change working directory");
+        }
     } else {
-        println!("cd: {}: No such file or directory", path);
+        println!("cd: {}: No such file or directory", arg);
     }
 }
 
