@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::env;
 use std::process;
 
-const BUILTINS: &[&str] = &["exit", "echo", "type", "pwd"];
+const BUILTINS: &[&str] = &["exit", "echo", "type", "pwd", "cd"];
 
 fn main() {
     loop {
@@ -28,8 +28,18 @@ fn main() {
             "echo"  => println!("{}", args.join(" ")),
             "type"  => run_type_command(args),
             "pwd"   => run_pwd_command(),
+            "cd"    => run_cd_command(args),
             _       => try_execute_command(cmd, args),
         }
+    }
+}
+
+fn run_cd_command(args: &[&str]) {
+    let path = args[0];
+    if std::path::Path::new(&path).exists() {
+        env::set_current_dir(path).expect("Failed to change working directory");
+    } else {
+        println!("cd: {}: No such file or directory", path);
     }
 }
 
