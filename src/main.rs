@@ -1,6 +1,7 @@
+use std::fs::File;
 use std::io::{self, Write};
 use std::env;
-use std::process;
+use std::process::{self};
 use shlex;
 
 const BUILTINS: &[&str] = &["exit", "echo", "type", "pwd", "cd"];
@@ -20,69 +21,151 @@ fn main() {
             continue;
         }
 
+        // Advanced split that heeds standard shell single and double quote rules
         let args = shlex::split(command).unwrap();
         let args = args.iter().map(|s| s.to_string()).collect::<Vec<String>>();
-        let args: &Vec<&str> = &args.iter().map(|s| &**s).collect();
+        let mut args: Vec<&str> = args.iter().map(|s| &**s).collect();
+
+        // If output redirected to file, store file name and remove redirect from args
+        let mut output_file_path = String::new();
+        if args.contains(&">") {
+            let index = args.iter().position(|arg| arg.contains(">")).unwrap();
+            if args.len() > index+1 {
+                output_file_path = args[index+1].to_string();
+                args.drain(index..);
+            }
+        } else if args.contains(&"1>") {
+            let index = args.iter().position(|arg| arg.contains("1>")).unwrap();
+            if args.len() > index+1 {
+                output_file_path = args[index+1].to_string();
+                args.drain(index..);
+            }
+        }
+
+        // Separating first element into command and remaining elements as arguments to command
         let cmd = args[0];
         let args = &args[1..];
-
+        
+        let result: Result<String, String>;
         match cmd {
             " "     => continue,
             "exit"  => process::exit(0),
-            "echo"  => println!("{}", args.join(" ")),
-            "type"  => run_type_command(args),
-            "pwd"   => run_pwd_command(),
-            "cd"    => run_cd_command(args),
-            _       => try_execute_command(cmd, args),
+            "echo"  => result = run_echo_command(args),
+            "type"  => result = run_type_command(args),
+            "pwd"   => result = run_pwd_command(),
+            "cd"    => result = run_cd_command(args),
+            _       => result = try_execute_command(cmd, args),
+        }
+
+        match result {
+            Ok(message) => {
+                if !output_file_path.is_empty() {
+                    write_output_to_file(message, output_file_path);
+                } else if !message.is_empty() {
+                    println!("{message}");
+                }
+            }
+            Err(message) => {
+                eprintln!("{message}");
+            }
         }
     }
 }
 
-fn run_cd_command(args: &[&str]) {
-    let arg = args[0];
-    if std::path::Path::new(&arg).exists() {
-        env::set_current_dir(arg).expect("Failed to change working directory");
-    } else if arg == "~" {
-        if let Some(path) = env::var_os("HOME") {
-            env::set_current_dir(path).expect("Failed to change working directory");
-        } else {
-            println!("cd: No home directory configured in environment variables");
-        }
-    } else {
-        println!("cd: {}: No such file or directory", arg);
-    }
+fn run_echo_command(args: &[&str]) -> Result<String, String> {
+    let message = args.join(" ");
+    Ok(message)
 }
 
-fn run_pwd_command() {
-    if let Ok(cwd) = env::current_dir() {
-        println!("{}", cwd.display());
-    }
-}
-
-fn run_type_command(args: &[&str]) {
+fn run_type_command(args: &[&str]) -> Result<String, String> {
     if args.is_empty() {
-        println!("type: missing operand");
-        return;
+        let message = String::from("type: missing operand");
+        return Err(message);
     }
 
     let target = args[0];
 
+    let result: Result<String, String>;
     if BUILTINS.contains(&target) {
-        println!("{} is a shell builtin", target);
+        let message = format!("{} is a shell builtin", target);
+        result = Ok(message)
     } else if let Some(path) = find_executable_in_path(target) {
-        println!("{} is {}", target, path);
+        let message = format!("{} is {}", target, path);
+        result = Ok(message)
     } else {
-        println!("{target}: not found")
+        let message = format!("{target}: not found");
+        result = Err(message)
     }
+
+    result
 }
 
-fn try_execute_command(cmd: &str, args: &[&str]) {
-    if let Some(_path) = find_executable_in_path(cmd) {
-        let output = process::Command::new(cmd).args(args).output().expect("failed to execute program");
-        io::stdout().write_all(&output.stdout).expect("couldn't write output to stdout");
-    } else { 
-        println!("{}: command not found", cmd);
+fn run_pwd_command() -> Result<String, String> {
+    let result: Result<String, String>;
+    if let Ok(cwd) = env::current_dir() {
+        let message = format!("{}", cwd.display());
+        result = Ok(message)
+    } else {
+        let message = format!("no current working directory found");
+        result = Err(message)
     }
+
+    result
+}
+
+fn run_cd_command(args: &[&str]) -> Result<String, String> {
+    let result: Result<String, String>;
+    
+    let arg = args[0];
+    if std::path::Path::new(&arg).exists() {
+        match env::set_current_dir(arg) {
+            Ok(_) => result = Ok(String::new()),
+            Err(_) => result = Err(String::from("failed to change working directory")),
+        }
+    } else if arg == "~" {
+        if let Some(path) = env::var_os("HOME") {
+            match env::set_current_dir(path) {
+                Ok(_) => result = Ok(String::new()),
+                Err(_) => result = Err(String::from("failed to change working directory")),
+        }
+        } else {
+            let message = String::from("cd: No home directory configured in environment variables");
+            result = Err(message);
+        }
+    } else {
+        let message = format!("cd: {}: No such file or directory", arg);
+        result = Err(message);
+    }
+
+    result
+}
+
+fn try_execute_command(cmd: &str, args: &[&str]) -> Result<String, String> {
+    let result: Result<String, String>;
+
+    if let Some(_path) = find_executable_in_path(cmd) {
+        if let Ok(output) = process::Command::new(cmd).args(args).output() {
+            if output.status.success() {
+                match str::from_utf8(&output.stdout) {
+                    Ok(val) => result = Ok(val.trim().to_string()),
+                    Err(_) => result = Err(String::from("failed to parse program output as text"))
+                }
+            } else {
+                match str::from_utf8(&output.stderr) {
+                    Ok(val) => result = Err(val.trim().to_string()),
+                    Err(_) => result = Err(String::from("failed to parse program output as text"))
+                }
+            }
+        } else {
+            let err_message = String::from("couldn't execute program");
+            result = Err(err_message)
+        }
+    } else { 
+        let err_msg = format!("{}: command not found", cmd);
+        result = Err(err_msg);
+    }
+
+    result
 }
 
 fn find_executable_in_path(file_name: &str) -> Option<String> {
@@ -113,4 +196,10 @@ fn find_executable_in_path(file_name: &str) -> Option<String> {
     }
 
     None
+}
+
+fn write_output_to_file(output: String, file_path: String) {
+    if let Ok(mut file) = File::create(file_path) {
+        file.write(output.as_bytes()).expect("failed to write to file");
+    }
 }
