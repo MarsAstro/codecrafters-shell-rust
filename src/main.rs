@@ -194,7 +194,8 @@ fn find_executable_in_path(file_name: &str) -> Option<String> {
 
 fn write_output_to_file(output: &String, file_path: &String) {
     if let Ok(mut file) = OpenOptions::new().append(true).open(file_path) {
-        file.write(output.as_bytes()).expect("failed to write to file");
+        let contents = output.to_owned() + &String::from("\n");
+        file.write(contents.as_bytes()).expect("failed to write to file");
     }
 }
 
