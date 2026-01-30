@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::fs::{ File, OpenOptions };
 use std::io::{self, Write};
 use std::env;
 use std::path::Path;
@@ -193,7 +193,7 @@ fn find_executable_in_path(file_name: &str) -> Option<String> {
 }
 
 fn write_output_to_file(output: &String, file_path: &String) {
-    if let Ok(mut file) = File::open(file_path) {
+    if let Ok(mut file) = OpenOptions::new().append(true).open(file_path) {
         file.write(output.as_bytes()).expect("failed to write to file");
     }
 }
