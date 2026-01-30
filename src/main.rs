@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{self, Write};
 use std::env;
+use std::path::Path;
 use std::process::{self};
 use shlex;
 
@@ -8,6 +9,11 @@ const BUILTINS: &[&str] = &["exit", "echo", "type", "pwd", "cd"];
 
 struct CmdOutput {
     output: String,
+    is_err: bool,
+}
+
+struct OutputFile {
+    path: String,
     is_err: bool,
 }
 
@@ -31,39 +37,7 @@ fn main() {
         let args = args.iter().map(|s| s.to_string()).collect::<Vec<String>>();
         let mut args: Vec<&str> = args.iter().map(|s| &**s).collect();
 
-        // If stdout redirected to file, store file name and remove redirect from args
-        let mut stdout_file_path = String::new();
-        if args.contains(&">") {
-            let index = args.iter().position(|arg| arg.contains(">")).unwrap();
-            if args.len() > index+1 {
-                stdout_file_path = args[index+1].to_string();
-                args.drain(index..);
-            }
-        } else if args.contains(&"1>") {
-            let index = args.iter().position(|arg| arg.contains("1>")).unwrap();
-            if args.len() > index+1 {
-                stdout_file_path = args[index+1].to_string();
-                args.drain(index..);
-            }
-        }
-
-        // If stderr redirected to file, store file name and remove redirect from args
-        let mut stderr_file_path = String::new();
-        if args.contains(&"2>") {
-            let index = args.iter().position(|arg| arg.contains("2>")).unwrap();
-            if args.len() > index+1 {
-                stderr_file_path = args[index+1].to_string();
-                args.drain(index..);
-            }
-        } 
-
-        // Create files, if any redirection attempted (will remain empty if command writes nothing to associated io handle)
-        if !stdout_file_path.is_empty() {
-            create_output_file(&stdout_file_path);
-        } else if !stderr_file_path.is_empty() {
-            create_output_file(&stderr_file_path);
-
-        }
+        let output_file = parse_args_for_output_file(&mut args);
 
         // Separating first element into command and remaining elements as arguments to command
         let cmd = args[0];
@@ -82,14 +56,14 @@ fn main() {
         
         for elem in output {
             if !elem.is_err {
-                if !stdout_file_path.is_empty() {
-                    write_output_to_file(&elem.output, &stdout_file_path);
+                if let Some(file) = &output_file && !file.is_err {
+                    write_output_to_file(&elem.output, &file.path);
                 } else {
                     println!("{}", elem.output);
                 }
             } else {
-                if !stderr_file_path.is_empty() {
-                    write_output_to_file(&elem.output, &stderr_file_path);
+                if let Some(file) = &output_file && file.is_err {
+                    write_output_to_file(&elem.output, &file.path);
                 } else {
                     eprintln!("{}", elem.output);
                 }
@@ -219,12 +193,60 @@ fn find_executable_in_path(file_name: &str) -> Option<String> {
 }
 
 fn write_output_to_file(output: &String, file_path: &String) {
-    if let Ok(mut file) = File::create(file_path) {
+    if let Ok(mut file) = File::open(file_path) {
         file.write(output.as_bytes()).expect("failed to write to file");
     }
 }
 
+fn parse_args_for_output_file(args: &mut Vec<&str>) -> Option<OutputFile> {
+    let mut result: Option<OutputFile> = None;
 
-fn create_output_file(file_path: &String) {
-    File::create(file_path).expect("failed to create file with given name");
+    for i in 0..args.len()-1 {
+        let mut truncate = true;
+        let mut is_err = false;
+        let path: String;
+
+        match args[i] {
+            ">" => {
+                path = args[i+1].to_string();
+            }
+            "1>" => {
+                path = args[i+1].to_string();
+            }
+            ">>" => {
+                path = args[i+1].to_string();
+                truncate = false;
+            }
+            "1>>" => {
+                path = args[i+1].to_string();
+                truncate = false;
+            }
+            "2>" => {
+                path = args[i+1].to_string();
+                is_err = true;
+            }
+            "2>>" => {
+                path = args[i+1].to_string();
+                is_err = true;
+                truncate = false;
+            }
+            _ => {
+                path = String::new()
+            }
+        }
+
+        if path.is_empty() {
+            continue;
+        }
+
+        if truncate || !std::path::Path::exists(Path::new(&path)) {
+            File::create(&path).expect("failed to create file with given name/path");
+        }
+
+        result = Some(OutputFile { path, is_err });
+        args.drain(i..);
+        break;
+    }
+
+    result
 }
