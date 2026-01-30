@@ -57,6 +57,14 @@ fn main() {
             }
         } 
 
+        // Create files, if any redirection attempted (will remain empty if command writes nothing to associated io handle)
+        if !stdout_file_path.is_empty() {
+            create_output_file(&stdout_file_path);
+        } else if !stderr_file_path.is_empty() {
+            create_output_file(&stderr_file_path);
+
+        }
+
         // Separating first element into command and remaining elements as arguments to command
         let cmd = args[0];
         let args = &args[1..];
@@ -214,4 +222,9 @@ fn write_output_to_file(output: &String, file_path: &String) {
     if let Ok(mut file) = File::create(file_path) {
         file.write(output.as_bytes()).expect("failed to write to file");
     }
+}
+
+
+fn create_output_file(file_path: &String) {
+    File::create(file_path).expect("failed to create file with given name");
 }
