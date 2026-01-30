@@ -6,6 +6,11 @@ use shlex;
 
 const BUILTINS: &[&str] = &["exit", "echo", "type", "pwd", "cd"];
 
+struct CmdOutput {
+    output: String,
+    is_err: bool,
+}
+
 fn main() {
     loop {
         print!("$ ");
@@ -26,146 +31,153 @@ fn main() {
         let args = args.iter().map(|s| s.to_string()).collect::<Vec<String>>();
         let mut args: Vec<&str> = args.iter().map(|s| &**s).collect();
 
-        // If output redirected to file, store file name and remove redirect from args
-        let mut output_file_path = String::new();
+        // If stdout redirected to file, store file name and remove redirect from args
+        let mut stdout_file_path = String::new();
         if args.contains(&">") {
             let index = args.iter().position(|arg| arg.contains(">")).unwrap();
             if args.len() > index+1 {
-                output_file_path = args[index+1].to_string();
+                stdout_file_path = args[index+1].to_string();
                 args.drain(index..);
             }
         } else if args.contains(&"1>") {
             let index = args.iter().position(|arg| arg.contains("1>")).unwrap();
             if args.len() > index+1 {
-                output_file_path = args[index+1].to_string();
+                stdout_file_path = args[index+1].to_string();
                 args.drain(index..);
             }
         }
+
+        // If stderr redirected to file, store file name and remove redirect from args
+        let mut stderr_file_path = String::new();
+        if args.contains(&"2>") {
+            let index = args.iter().position(|arg| arg.contains("2>")).unwrap();
+            if args.len() > index+1 {
+                stderr_file_path = args[index+1].to_string();
+                args.drain(index..);
+            }
+        } 
 
         // Separating first element into command and remaining elements as arguments to command
         let cmd = args[0];
         let args = &args[1..];
         
-        let result: Result<String, String>;
+        let mut output: Vec<CmdOutput> = Vec::new();
         match cmd {
             " "     => continue,
             "exit"  => process::exit(0),
-            "echo"  => result = run_echo_command(args),
-            "type"  => result = run_type_command(args),
-            "pwd"   => result = run_pwd_command(),
-            "cd"    => result = run_cd_command(args),
-            _       => result = try_execute_command(cmd, args),
+            "echo"  => run_echo_command(&mut output, args),
+            "type"  => run_type_command(&mut output, args),
+            "pwd"   => run_pwd_command(&mut output),
+            "cd"    => run_cd_command(&mut output, args),
+            _       => try_execute_command(&mut output, cmd, args),
         }
-
-        match result {
-            Ok(message) => {
-                if !output_file_path.is_empty() {
-                    write_output_to_file(message, output_file_path);
-                } else if !message.is_empty() {
-                    println!("{message}");
+        
+        for elem in output {
+            if !elem.is_err {
+                if !stdout_file_path.is_empty() {
+                    write_output_to_file(&elem.output, &stdout_file_path);
+                } else {
+                    println!("{}", elem.output);
                 }
-            }
-            Err(message) => {
-                eprintln!("{message}");
+            } else {
+                if !stderr_file_path.is_empty() {
+                    write_output_to_file(&elem.output, &stderr_file_path);
+                } else {
+                    eprintln!("{}", elem.output);
+                }
             }
         }
     }
 }
 
-fn run_echo_command(args: &[&str]) -> Result<String, String> {
+fn run_echo_command(output: &mut Vec<CmdOutput>, args: &[&str]) {
     let message = args.join(" ");
-    Ok(message)
+    output.push(CmdOutput {output: message, is_err: false })
 }
 
-fn run_type_command(args: &[&str]) -> Result<String, String> {
+fn run_type_command(output: &mut Vec<CmdOutput>, args: &[&str]) {
     if args.is_empty() {
         let message = String::from("type: missing operand");
-        return Err(message);
+        output.push(CmdOutput {output: message, is_err: true });
+        return;
     }
 
     let target = args[0];
 
-    let result: Result<String, String>;
     if BUILTINS.contains(&target) {
         let message = format!("{} is a shell builtin", target);
-        result = Ok(message)
+        output.push(CmdOutput {output: message, is_err: false });
     } else if let Some(path) = find_executable_in_path(target) {
         let message = format!("{} is {}", target, path);
-        result = Ok(message)
+        output.push(CmdOutput {output: message, is_err: false });
     } else {
         let message = format!("{target}: not found");
-        result = Err(message)
+        output.push(CmdOutput {output: message, is_err: true });
     }
-
-    result
 }
 
-fn run_pwd_command() -> Result<String, String> {
-    let result: Result<String, String>;
+fn run_pwd_command(output: &mut Vec<CmdOutput>) {
     if let Ok(cwd) = env::current_dir() {
         let message = format!("{}", cwd.display());
-        result = Ok(message)
+        output.push(CmdOutput {output: message, is_err: false });
     } else {
         let message = format!("no current working directory found");
-        result = Err(message)
+        output.push(CmdOutput {output: message, is_err: true });
     }
-
-    result
 }
 
-fn run_cd_command(args: &[&str]) -> Result<String, String> {
-    let result: Result<String, String>;
-    
+fn run_cd_command(output: &mut Vec<CmdOutput>, args: &[&str]) {
     let arg = args[0];
     if std::path::Path::new(&arg).exists() {
         match env::set_current_dir(arg) {
-            Ok(_) => result = Ok(String::new()),
-            Err(_) => result = Err(String::from("failed to change working directory")),
+            Ok(_) => (),
+            Err(_) => output.push(CmdOutput {output: String::from("failed to change working directory"), is_err: true }),
         }
     } else if arg == "~" {
         if let Some(path) = env::var_os("HOME") {
             match env::set_current_dir(path) {
-                Ok(_) => result = Ok(String::new()),
-                Err(_) => result = Err(String::from("failed to change working directory")),
+                Ok(_) => (),
+                Err(_) => output.push(CmdOutput {output: String::from("failed to change working directory"), is_err: true }),
         }
         } else {
             let message = String::from("cd: No home directory configured in environment variables");
-            result = Err(message);
+            output.push(CmdOutput {output: message, is_err: true });
         }
     } else {
         let message = format!("cd: {}: No such file or directory", arg);
-        result = Err(message);
+        output.push(CmdOutput {output: message, is_err: true });
     }
-
-    result
 }
 
-fn try_execute_command(cmd: &str, args: &[&str]) -> Result<String, String> {
-    let result: Result<String, String>;
-
+fn try_execute_command(output: &mut Vec<CmdOutput>, cmd: &str, args: &[&str]) {
     if let Some(_path) = find_executable_in_path(cmd) {
-        if let Ok(output) = process::Command::new(cmd).args(args).output() {
-            if output.status.success() {
-                match str::from_utf8(&output.stdout) {
-                    Ok(val) => result = Ok(val.trim().to_string()),
-                    Err(_) => result = Err(String::from("failed to parse program output as text"))
-                }
-            } else {
-                match str::from_utf8(&output.stderr) {
-                    Ok(val) => result = Err(val.trim().to_string()),
-                    Err(_) => result = Err(String::from("failed to parse program output as text"))
-                }
+        if let Ok(exe_output) = process::Command::new(cmd).args(args).output() {
+            match str::from_utf8(&exe_output.stdout) {
+                Ok(val) => {
+                    let message = val.trim().to_string();
+                    if !message.is_empty() {
+                        output.push(CmdOutput {output: message, is_err: false })
+                    }
+                },
+                Err(_) => output.push(CmdOutput {output: String::from("failed to parse program output as text"), is_err: true }),
+            }
+            match str::from_utf8(&exe_output.stderr) {
+                Ok(val) => {
+                    let message = val.trim().to_string();
+                    if !message.is_empty() {
+                        output.push(CmdOutput {output: message, is_err: true })
+                    }
+                },
+                Err(_) => output.push(CmdOutput {output: String::from("failed to parse program output as text"), is_err: true }),
             }
         } else {
-            let err_message = String::from("couldn't execute program");
-            result = Err(err_message)
+            let message = String::from("couldn't execute program");
+            output.push(CmdOutput {output: message, is_err: true });
         }
     } else { 
-        let err_msg = format!("{}: command not found", cmd);
-        result = Err(err_msg);
+        let message = format!("{}: command not found", cmd);
+        output.push(CmdOutput {output: message, is_err: true });
     }
-
-    result
 }
 
 fn find_executable_in_path(file_name: &str) -> Option<String> {
@@ -198,7 +210,7 @@ fn find_executable_in_path(file_name: &str) -> Option<String> {
     None
 }
 
-fn write_output_to_file(output: String, file_path: String) {
+fn write_output_to_file(output: &String, file_path: &String) {
     if let Ok(mut file) = File::create(file_path) {
         file.write(output.as_bytes()).expect("failed to write to file");
     }
